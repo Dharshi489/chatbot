@@ -1,0 +1,139 @@
+import streamlit as st
+from groq import Groq
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# -----------------------------
+# CONFIG
+# -----------------------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+client = Groq(api_key=GROQ_API_KEY)
+# -----------------------------
+# SESSION STATE (CHAT MEMORY)
+# -----------------------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# -----------------------------
+# CALLBACK FUNCTION
+# -----------------------------
+def on_new_response(response_text: str):
+    """
+    Callback function triggered after getting response
+    You can extend this (logging, analytics, etc.)
+    """
+    print("Callback Triggered [OK]")
+    try:
+        print("Response:", response_text)
+    except UnicodeEncodeError:
+        print("Response:", response_text.encode('ascii', 'ignore').decode('ascii'))
+
+# -----------------------------
+# GENERATE RESPONSE (LLAMA)
+# -----------------------------
+def get_llama_response(user_input: str) -> str:
+    try:
+        # Prepare conversation history
+        messages = []
+
+        for msg in st.session_state.messages:
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+
+        # Add current user input
+        messages.append({
+            "role": "user",
+            "content": user_input
+        })
+
+        import time
+        # API call
+        for attempt in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=1024,
+                    timeout=60.0
+                )
+                break
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(2)
+                else:
+                    raise e
+        
+        reply = response.choices[0].message.content
+
+        # Trigger callback
+        on_new_response(reply)
+
+        return reply
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+# -----------------------------
+# MAIN RESPONSE HANDLER
+# -----------------------------
+def get_response(user_input: str) -> str:
+    if not user_input.strip():
+        return "Please enter a valid message."
+
+    # Simple intent handling
+    if user_input.lower() in ["hi", "hello", "hey"]:
+        return "Hello! How can I help you today?"
+
+    return get_llama_response(user_input)
+
+# -----------------------------
+# STREAMLIT UI
+# -----------------------------
+st.set_page_config(page_title=" Nexoria AI ", layout="wide")
+st.title(" 🤖 Nexoria AI")
+
+# Sidebar
+with st.sidebar:
+    st.header("⚙ Settings")
+    st.markdown("**Model:** llama-3.1-8b-instant (Groq)")
+    
+    if st.button("🗑 Clear Chat"):
+        st.session_state.messages = []
+        st.rerun()
+
+# Display chat history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# User input
+if user_input := st.chat_input("Type your message..."):
+
+    # Store user message
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input
+    })
+
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    # Generate assistant response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            response = get_response(user_input)
+            st.markdown(response)
+
+    # Store assistant response
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": response
+    })
